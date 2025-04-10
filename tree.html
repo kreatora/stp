@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Energy Ontology Visualization</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Left sidebar styling */
+        .sidebar {
+            width: 350px;
+            border-right: 1px solid #ccc;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+        }
+
+        .tree-view {
+            padding: 10px;
+        }
+
+        .tree-node {
+            margin: 2px 0;
+        }
+
+        .tree-node-content {
+            padding: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+        }
+
+        .tree-node-content:hover {
+            background-color: #e9e9e9;
+        }
+
+        .tree-node-content.selected {
+            background-color: #e8eef7;
+        }
+
+        .tree-children {
+            margin-left: 20px;
+        }
+
+        .expander {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            text-align: center;
+            line-height: 16px;
+            margin-right: 5px;
+            font-size: 12px;
+        }
+
+        /* Main content styling */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .search-bar {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .search-input {
+            width: calc(100% - 20px);
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .details-panel {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            background-color: #f9f9f9;
+        }
+
+        .control-bar {
+            padding: 10px;
+            display: flex;
+            gap: 5px;
+            background-color: #34495e;
+        }
+
+        .control-button {
+            padding: 5px 10px;
+            background-color: #34495e;
+            color: white;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .toggle-switch {
+            margin-left: auto;
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+            background-color: rgba(255, 255, 255, 0.4);
+            border-radius: 12px;
+            cursor: pointer;
+        }
+
+        .toggle-switch-inner {
+            position: absolute;
+            content: '';
+            height: 20px;
+            width: 20px;
+            left: 2px;
+            bottom: 2px;
+            border-radius: 50%;
+            background-color: white;
+            transition: 0.4s;
+        }
+
+        .toggle-active .toggle-switch-inner {
+            transform: translateX(26px);
+        }
+
+        .visualization {
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Graph visualization styling */
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .node circle {
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+
+        .node text {
+            font: 12px sans-serif;
+            text-anchor: middle;
+            fill: white;
+            font-weight: bold;
+        }
+
+        .link {
+            fill: none;
+            stroke: #555;
+            stroke-opacity: 0.4;
+            stroke-width: 1.5px;
+        }
+
+        .focused {
+            stroke-width: 3px;
+            stroke: #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="tree-view" id="ontology-tree">
+            </div>
+    </div>
+
+    <div class="main-content">
+        <div class="search-bar">
+            <input type="text" class="search-input" placeholder="Search classes:">
+        </div>
+
+        <div class="details-panel" id="details-panel">
+            </div>
+
+        <div class="control-bar">
+            <button class="control-button" id="shrink-btn">SHRINK</button>
+            <button class="control-button" id="expand-btn">EXPAND</button>
+            <button class="control-button" id="parent-btn">PARENT</button>
+            <button class="control-button" id="focus-btn">FOCUS</button>
+            <button class="control-button" id="fit-btn">FIT</button>
+            <div class="toggle-switch" id="toggle-switch">
+                <div class="toggle-switch-inner"></div>
+            </div>
+        </div>
+
+        <div class="visualization" id="visualization-container">
+            <svg id="visualization-svg"></svg>
+        </div>
+    </div>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+        // Variable to store the ontology data
+        let ontologyData = null;
+        let currentFocusNode = null;
+
+        // Generate the tree view
+        function generateTreeView(data, container, level = 0) {
+            const nodeDiv = document.createElement('div');
+            nodeDiv.className = 'tree-node';
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'tree-node-content';
+            contentDiv.dataset.id = data.id || '';
+            contentDiv.dataset.name = data.name || '';
+            contentDiv.dataset.definition = data.definition || '';
+
+            // Add expander if there are children
+            const expanderSpan = document.createElement('span');
+            expanderSpan.className = 'expander';
+
+            if (data.children && data.children.length > 0) {
+                expanderSpan.textContent = '►';
+                expanderSpan.onclick = function(e) {
+                    e.stopPropagation();
+                    const childrenDiv = nodeDiv.querySelector('.tree-children');
+                    if (childrenDiv.style.display === 'none') {
+                        childrenDiv.style.display = 'block';
+                        expanderSpan.textContent = '▼';
+                    } else {
+                        childrenDiv.style.display = 'none';
+                        expanderSpan.textContent = '►';
+                    }
+                };
+            } else {
+                expanderSpan.textContent = ' ';
+            }
+
+            contentDiv.appendChild(expanderSpan);
+
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = data.name || '';
+            contentDiv.appendChild(nameSpan);
+
+            contentDiv.onclick = function() {
+                // Remove selected class from all nodes
+                document.querySelectorAll('.tree-node-content').forEach(node => {
+                    node.classList.remove('selected');
+                });
+
+                // Add selected class to this node
+                this.classList.add('selected');
+
+                // Update details panel
+                updateDetailsPanel(data);
+
+                // Update visualization
+                updateVisualization(data);
+            };
+
+            nodeDiv.appendChild(contentDiv);
+
+            // Create children container
+            if (data.children && data.children.length > 0) {
+                const childrenDiv = document.createElement('div');
+                childrenDiv.className = 'tree-children';
+                childrenDiv.style.display = level < 2 ? 'block' : 'none';
+
+                data.children.forEach(child => {
+                    generateTreeView(child, childrenDiv, level + 1);
+                });
+
+                nodeDiv.appendChild(childrenDiv);
+
+                // Set initial state of expander
+                if (level < 2) {
+                    expanderSpan.textContent = '▼';
+                }
+            }
+
+            container.appendChild(nodeDiv);
+        }
+
+        // Update details panel
+        function updateDetailsPanel(data) {
+            const detailsPanel = document.getElementById('details-panel');
+            detailsPanel.innerHTML = `
+                <div>
+                    <strong>Name:</strong> ${data.name || ''}
+                    <strong style="margin-left: 20px;">ID:</strong> ${data.id || ''}
+                </div>
+                <div>
+                    <strong>Definition:</strong> ${data.definition || 'No definition available.'}
+                </div>
+            `;
+        }
+
+        // Visualization functions
+        function updateVisualization(focusNode) {
+            currentFocusNode = focusNode;
+
+            const svg = d3.select('#visualization-svg');
+            svg.selectAll('*').remove();
+
+            const width = svg.node().parentElement.clientWidth;
+            const height = svg.node().parentElement.clientHeight;
+
+            const g = svg.append('g')
+                .attr('transform', `translate(${width / 2}, ${height / 2})`);
+
+            // Create a smaller dataset focused on the selected node and its immediate connections
+            let nodesData = [];
+            let linksData = [];
+
+            // Add the focus node
+            nodesData.push({
+                id: focusNode.id || '',
+                name: focusNode.name || '',
+                level: 0,
+                color: '#2980b9'  // Main focus node color
+            });
+
+            // Add children if they exist
+            if (focusNode.children && focusNode.children.length > 0) {
+                focusNode.children.forEach((child, i) => {
+                    nodesData.push({
+                        id: child.id || '',
+                        name: child.name || '',
+                        level: 1,
+                        color: '#a6e1ec'  // Child node color
+                    });
+
+                    linksData.push({
+                        source: focusNode.id || '',
+                        target: child.id || ''
+                    });
+                });
+            }
+
+            // Function to find a node's parent
+            function findParent(root, nodeId, parent = null) {
+                if (root.id === nodeId) return parent;
+                if (root.children) {
+                    for (const child of root.children) {
+                        const found = findParent(child, nodeId, root);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            }
+
+            // If the node has a parent, show the parent and siblings
+            if (ontologyData) {
+                const parent = findParent(ontologyData, focusNode.id);
+                if (parent) {
+                    // Add parent
+                    nodesData.push({
+                        id: parent.id || '',
+                        name: parent.name || '',
+                        level: -1,
+                        color: '#34495e'  // Parent node color
+                    });
+
+                    linksData.push({
+                        source: parent.id || '',
+                        target: focusNode.id || ''
+                    });
+
+                    // Add siblings
+                    parent.children.forEach(sibling => {
+                        if (sibling.id !== focusNode.id) {
+                            nodesData.push({
+                                id: sibling.id || '',
+                                name: sibling.name || '',
+                                level: 0,
+                                color: '#95a5a6'  // Sibling node color
+                            });
+
+                            linksData.push({
+                                source: parent.id || '',
+                                target: sibling.id || ''
+                            });
+                        }
+                    });
+                }
+            }
+
+            // Create the force simulation
+            const simulation = d3.forceSimulation(nodesData)
+                .force('link', d3.forceLink(linksData).id(d => d.id).distance(120))
+                .force('charge', d3.forceManyBody().strength(-1000))
+                .force('center', d3.forceCenter(0, 0))
+                .force('collision', d3.forceCollide().radius(60));
+
+            // Draw links
+            const link = g.selectAll('.link')
+                .data(linksData)
+                .enter().append('line')
+                .attr('class', 'link');
+
+            // Draw nodes
+            const node = g.selectAll('.node')
+                .data(nodesData)
+                .enter().append('g')
+                .attr('class', 'node')
+                .call(d3.drag()
+                    .on('start', dragstarted)
+                    .on('drag', dragged)
+                    .on('end', dragended));
+
+            // Add circles to nodes
+            node.append('circle')
+                .attr('r', d => d.level === 0 ? 50 : 40)
+                .style('fill', d => d.color);
+
+            // Add labels to nodes
+            node.append('text')
+                .attr('dy', '.35em')
+                .style('text-anchor', 'middle')
+                .text(d => d.name)
+                .each(function(d) {
+                    // Handle long text with wrapping
+                    const text = d3.select(this);
+                    const words = d.name.split(/\s+/);
+                    text.text('');
+
+                    const lineHeight = 1.1;
+                    const y = text.attr('y') || 0;
+                    const radius = d.level === 0 ? 50 : 40;
+                    const maxWidth = radius * 1.5;
+
+                    let tspan = text.append('tspan')
+                        .attr('x', 0)
+                        .attr('y', y)
+                        .attr('dy', '0em');
+
+                    let line = '';
+                    let lineNumber = 0;
+
+                    for (let i = 0; i < words.length; i++) {
+                        const word = words[i];
+                        const testLine = line + (line ? ' ' : '') + word;
+                        const testWidth = getTextWidth(testLine, '12px sans-serif');
+
+                        if (testWidth > maxWidth && i > 0) {
+                            tspan.text(line);
+                            lineNumber++;
+                            line = word;
+                            tspan = text.append('tspan')
+                                .attr('x', 0)
+                                .attr('y', y)
+                                .attr('dy', `${lineNumber * lineHeight}em`)
+                                .text(word);
+                        } else {
+                            line = testLine;
+                            tspan.text(line);
+                        }
+                    }
+
+                    // Center the text vertically based on the number of lines
+                    const tspans = text.selectAll('tspan');
+                    const numLines = tspans.size();
+
+                    if (numLines > 1) {
+                        const offset = (numLines - 1) * lineHeight / 2;
+                        tspans.each(function(_, i) {
+                            const tspan = d3.select(this);
+                            const currentDy = parseFloat(tspan.attr('dy'));
+                            tspan.attr('dy', `${currentDy - offset}em`);
+                        });
+                    }
+                });
+
+            // Make nodes clickable
+            node.on('click', function(event, d) {
+                // Find the corresponding node in the ontology data
+                function findNode(root, id) {
+                    if (root.id === id) return root;
+                    if (root.children) {
+                        for (const child of root.children) {
+                            const found = findNode(child, id);
+                            if (found) return found;
+                        }
+                    }
+                    return null;
+                }
+
+                if (ontologyData) {
+                    const clickedNode = findNode(ontologyData, d.id);
+                    if (clickedNode) {
+                        // Update details panel
+                        updateDetailsPanel(clickedNode);
+
+                        // Select the corresponding tree node
+                        document.querySelectorAll('.tree-node-content').forEach(node => {
+                            if (node.dataset.id === clickedNode.id) {
+                                node.click();
+                            }
+                        });
+                    }
+                }
+            });
+
+            // Update simulation on tick
+            simulation.on('tick', () => {
+                link
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+
+                node.attr('transform', d => `translate(<span class="math-inline">\{d\.x\},</span>{d.y})`);
+            });
+
+            // Drag functions
+            function dragstarted(event) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                event.subject.fx = event.subject.x;
+                event.subject.fy = event.subject.y;
+            }
+
+            function dragged(event) {
+                event.subject.fx = event.x;
+                event.subject.fy = event.y;
+            }
+
+            function dragended(event) {
+                if (!event.active) simulation.alphaTarget(0);

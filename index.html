@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Energy Ontology Visualization</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            background: #f0f2f5;
+        }
+
+        .viewport {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            position: relative;
+            background: #e0e0e0; /* Debug background */
+            border: 2px solid red; /* Debug border */
+        }
+
+        .visualization-container {
+            width: 4000px;
+            height: 4000px;
+            position: relative;
+            overflow: visible;
+            cursor: grab;
+            background: #f0f2f5;
+            background-image: radial-gradient(#e0e0e0 1px, transparent 1px);
+            background-size: 20px 20px;
+            transform-origin: center center;
+            border: 2px solid blue;
+        }
+
+        .card {
+            position: absolute;
+            width: 300px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 16px;
+            transition: all 0.3s ease;
+            border: 2px solid green;
+            z-index: 1;
+            cursor: pointer;
+        }
+
+        .card .card-content {
+            display: block; /* Always show card content */
+        }
+
+        .card.collapsed .card-content {
+            display: none;
+        }
+
+        .card.hidden {
+            display: none;
+        }
+
+        .expand-icon {
+            position: absolute;
+            right: 16px;
+            top: 16px;
+            width: 24px;
+            height: 24px;
+            background: #2980b9;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+        }
+
+        .card.collapsed .expand-icon {
+            transform: rotate(-90deg);
+        }
+
+        .card:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            transform: translateY(-2px);
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+
+        .card-definition {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 16px;
+            line-height: 1.4;
+        }
+
+        .card-id {
+            font-size: 12px;
+            color: #999;
+            margin-bottom: 8px;
+        }
+
+        .connection-line {
+            position: absolute;
+            height: 2px;
+            background: #2980b9;
+            transform-origin: 0 0;
+            pointer-events: none;
+            z-index: 0; /* Ensure lines are below cards */
+        }
+
+        .zoom-controls {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            gap: 8px;
+            background: white;
+            padding: 8px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .zoom-button {
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 4px;
+            background: #2980b9;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .zoom-level {
+            width: 60px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+        }
+
+        .card.root-card {
+            display: block !important; /* Always show root card */
+        }
+
+        .card.root-card .card-definition {
+            display: block !important; /* Always show root card content */
+        }
+    </style>
+</head>
+<body>
+    <div class="viewport">
+        <div class="visualization-container" id="visualization">
+            <!-- Cards will be dynamically added here -->
+        </div>
+    </div>
+
+    <div class="zoom-controls">
+        <button class="zoom-button" id="zoom-out">-</button>
+        <div class="zoom-level" id="zoom-level">100%</div>
+        <button class="zoom-button" id="zoom-in">+</button>
+    </div>
+
+    <script>
+        let scale = 1;
+        let offsetX = 0;
+        let offsetY = 0;
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+
+        // Add debug logging
+        console.log('Starting visualization...');
+
+        const visualization = document.getElementById('visualization');
+        console.log('Visualization element:', visualization);
+
+        // Center the visualization initially
+        offsetX = -1800;  // Adjusted to center the root node
+        offsetY = -150;   // Adjusted to show the root node higher
+        visualization.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+        console.log('Initial transform:', visualization.style.transform);
+
+        // Load data from ontology_tree.json
+        fetch('ontology_tree.json')
+            .then(response => response.json())
+            .then(data => {
+                console.log('Loaded ontology data:', data);
+                renderHierarchy(data);
+                drawConnections();
+            })
+            .catch(error => {
+                console.error('Error loading ontology data:', error);
+            });
+
+        // Map to track all nodes in the hierarchy
+        const nodeMap = new Map();
+
+        let nodeIdCounter = 0;
+        function renderHierarchy(node, x = 2000, y = 200, level = 0, parentId = null) {
+            if (!node.id) { // Add ID if it's missing
+                node.id = `node-${nodeIdCounter++}`;
+            }
+            console.log('Rendering node:', node.name, 'at position:', x, y, 'level:', level);
+            
+            // Store node in map for later reference
+            nodeMap.set(node.id, node);
+            
+            // Create the card first
+            const card = document.createElement('div');
+            card.className = 'card';
+            if (level === 0) {
+                card.classList.add('root-card');
+            } else if (level > 1) {
+                card.classList.add('hidden');
+            }
+
+            card.dataset.id = node.id;
+            card.dataset.x = x;
+            card.dataset.y = y;
+            card.dataset.level = level;
+            if (parentId) {
+                card.dataset.parentId = parentId;
+            }
+            card.style.left = `${x}px`;
+            card.style.top = `${y}px`;
+            
+            const hasChildren = node.children && node.children.length > 0;
+            
+            card.innerHTML = `
+                <div class="card-id">${node.id}</div>
+                <div class="card-title">${node.name}</div>
+                <div class="card-definition card-content">${node.definition || 'No definition available'}</div>
+                ${hasChildren ? '<div class="expand-icon">▼</div>' : ''}
+            `;
+
+            // Add the card to the visualization container
+            visualization.appendChild(card);
+            
+            // Add click handler for cards with children
+            if (hasChildren) {
+                card.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    
+                    // Toggle 'collapsed' class on the clicked card
+                    this.classList.toggle('collapsed');
+                    const isCollapsed = this.classList.contains('collapsed');
+                    
+                    // Update expand icon text based on collapsed state
+                    const expandIcon = this.querySelector('.expand-icon');
+                    if (expandIcon) {
+                        expandIcon.textContent = isCollapsed ? '▶' : '▼';
+                    }
+                    
+                    // Get all child cards for the current card
+                    const childCards = Array.from(document.querySelectorAll(`.card[data-parent-id="${node.id}"]`));
+                    
+                    // Toggle visibility of direct children based on the collapsed state
+                    childCards.forEach(childCard => {
+                        childCard.classList.toggle('hidden', isCollapsed);
+                        
+                        if (isCollapsed) {
+                            // If collapsing, also hide all descendants
+                            hideAllDescendants(childCard.dataset.id);
+                        } else {
+                            // If expanding, ensure direct children are visible
+                            childCard.classList.remove('hidden');
+                            childCard.style.display = 'block';
+                        }
+                    });
+                    
+                    drawConnections();
+                });
+            }
+
+            // Render children if they exist
+            if (node.children && node.children.length > 0) {
+                const childWidth = 400;
+                const startX = x - (node.children.length * childWidth) / 2;
+                
+                node.children.forEach((child, index) => {
+                    const childX = startX + index * childWidth;
+                    const childY = y + 300;
+                    renderHierarchy(child, childX, childY, level + 1, node.id);
+                });
+            }
+        }
+
+        function hideAllDescendants(nodeId) {
+            // Find all cards that have this nodeId as parent
+            const children = Array.from(document.querySelectorAll(`.card[data-parent-id="${nodeId}"]`));
+            
+            children.forEach(child => {
+                child.classList.add('hidden');
+                hideAllDescendants(child.dataset.id);
+            });
+        }
+
+        function createConnection(x1, y1, x2, y2) {
+            const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+            const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+            
+            const line = document.createElement('div');
+            line.className = 'connection-line';
+            line.style.width = `${length}px`;
+            line.style.left = `${x1}px`;
+            line.style.top = `${y1}px`;
+            line.style.transform = `rotate(${angle}deg)`;
+            
+            visualization.appendChild(line);
+        }
+
+        function drawConnections() {
+            // Remove existing connections
+            document.querySelectorAll('.connection-line').forEach(line => line.remove());
+
+            console.log('Drawing connections...');
+            const visibleCards = Array.from(document.querySelectorAll('.card:not(.hidden)'));
+            console.log('Found visible cards:', visibleCards.length);
+
+            visibleCards.forEach(card => {
+                if (card.dataset.parentId) {
+                    const parentCard = document.querySelector(`.card[data-id="${card.dataset.parentId}"]`);
+                    if (parentCard && !parentCard.classList.contains('hidden')) {
+                        const x1 = parseFloat(parentCard.dataset.x) + 150;
+                        const y1 = parseFloat(parentCard.dataset.y) + 100;
+                        const x2 = parseFloat(card.dataset.x) + 150;
+                        const y2 = parseFloat(card.dataset.y);
+                        
+                        console.log('Creating connection between:', parentCard.dataset.id, 'and', card.dataset.id);
+                        createConnection(x1, y1, x2, y2);
+                    }
+                }
+            });
+        }
+
+        // Dragging functionality
+        visualization.addEventListener('mousedown', (e) => {
+            // Only start dragging if we're not clicking on a card
+            if (e.target.closest('.card') === null) {
+                isDragging = true;
+                startX = e.clientX - offsetX;
+                startY = e.clientY - offsetY;
+                visualization.style.cursor = 'grabbing';
+            }
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            offsetX = e.clientX - startX;
+            offsetY = e.clientY - startY;
+            
+            visualization.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+            visualization.style.cursor = 'grab';
+        });
+
+        // Zoom functionality
+        document.getElementById('zoom-in').addEventListener('click', () => {
+            scale = Math.min(scale * 1.2, 2);
+            updateZoom();
+        });
+
+        document.getElementById('zoom-out').addEventListener('click', () => {
+            scale = Math.max(scale / 1.2, 0.5);
+            updateZoom();
+        });
+
+        function updateZoom() {
+            visualization.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+            document.getElementById('zoom-level').textContent = `${Math.round(scale * 100)}%`;
+        }
+    </script>
+</body>
+</html>
